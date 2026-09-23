@@ -1,6 +1,6 @@
 # HELMET · Spectral Workbench
 
-One local app for exploring hyperspectral scenes, organizing signatures, and testing mixture experiments. Includes a synthetic landscape, six illustrative material spectra, and a saved 65/35 meadow–soil mixture. These are demonstration data, not measured materials or sensor observations.
+One local app for exploring hyperspectral scenes, mapping material abundances, organizing signatures, and testing mixture experiments. The app starts with an **Open dataset** screen. Existing saved libraries are preserved; new libraries start empty. Historical demonstration files remain on disk but are not loaded automatically.
 
 ## Start
 
@@ -59,7 +59,7 @@ Automatic units recognize micrometer-scale wavelength headers (less than 50) and
 
 The running CSV is `data/spectral_library.csv`. It retains names, categories, descriptions, source, timestamps, archival status, band indices, band centers in nm, reflectance, and validity flags. Source details for saved pixels include row and column. Invalid reflectance is blank with valid=0. Writes are atomic and serialized within one server. Do not run multiple servers against the same writable library.
 
-`Download library CSV` exports active materials. Archived records remain in the on-disk CSV for restoration. To select another persistent library, use `--library "/full/path/to/library.csv"`. A new library starts with the six synthetic examples.
+`Download library CSV` exports active materials. Archived records remain in the on-disk CSV for restoration. To select another persistent library, use `--library "/full/path/to/library.csv"`. A new library starts empty; import your measured spectra or save signatures from your dataset.
 
 **When upgrading, preserve your existing `data/spectral_library.csv`.** Do not replace it with the demo copy from a fresh download.
 
@@ -105,3 +105,35 @@ The 23 tests cover resampling configuration, gap boundaries, shared-band average
 
 The supplied earlier folders remain unchanged; this is a separate, consolidated application.
 # spectral_tools
+
+### Full-scene abundance maps
+
+In the dedicated **Unmix** workspace, choose library candidates and solver settings, then select **Unmix entire scene**. Every pixel is attempted in batches of 64, using the same wavelength alignment, validity masks, scaling, and solver as individual-pixel fitting. Progress reports invalid and failed pixels. **Stop after current batch** retains partial results. Large scenes and highly correlated candidate libraries can take time; results are held in browser memory until settings change or the page reloads.
+
+Select a **Material channel** beneath the spectral chart to view its abundances. Hover/click a pixel or enter its zero-based row and column for the exact coefficient, RMSE, status, and sparsity used. The default display scale is 0–1; change **Display maximum** or select **Fit channel range** for other ranges. Gray means unavailable, not zero. Sparse coefficients are raw nonnegative regression weights and may exceed 1 or sum to a value other than 1; fraction mode retains its sum-to-one constraint.
+
+Optional sparse retries apply only when the solver fails to converge: increase strength tenfold (at least 0.001), up to **Maximum retry sparsity**. Invalid spectra and high reconstruction error do not trigger retries. Each pixel records its actual strength and attempt count; increasing sparsity changes the optimization objective and need not improve accuracy. Similar library spectra can still produce ambiguous material abundances.
+
+**Download pixel CSV** exports one row for every image pixel, with zero-based `row` and `column`, a coefficient column per material (including its stable library ID), fitting mode, status, actual sparsity, attempts, valid-band count, RMSE, relative error, and diagnostic message. Invalid, failed, and unprocessed pixels have blank coefficients. A stopped run remains exportable. Changing the dataset, candidate set, fitting settings, or library clears stale maps.
+
+Target selection now stays above the analysis tabs. Checking a library card also selects that material in the detail panel; archive/restore buttons name their exact target. After archiving, the panel clears rather than silently selecting another material.
+
+### Linked comparison viewer and rectangle exports
+
+After starting scene unmixing, select **Open comparison viewer** above the map. The original RGB image and selected abundance channel appear side by side in a large window. Drag either image in **Pan** mode, scroll to zoom around the cursor, or use the zoom buttons and **Fit both**. Both views share the same center and scale. Arrow keys pan a focused canvas; +/− zoom. Change the material channel, display maximum, or original-image palette without losing the selected area. The linked crosshair reports source coordinates, abundance, RMSE, and solver status.
+
+Choose **Select rectangle** and drag in either image; reversed drags are supported and rectangles are clipped to the source image. The rectangle appears in both views and remains anchored while panning and zooming. You can also enter exact zero-based first/last row and column bounds, including both endpoints. A single-pixel rectangle is valid. The export panel shows dimensions, pixel count, spectral sample count, and an approximate uncompressed size.
+
+**Save images + abundances + spectra** downloads one ZIP containing:
+
+- `original.png`: native-resolution RGB crop with palette and coordinate captions.
+- `abundance.png`: native-resolution crop of the displayed material, with its name and a 0-to-display-maximum legend. Unavailable coefficients are gray. Captions add padding; the original raster begins at (0, 56), and its dimensions are recorded in metadata.
+- `abundances.csv`: every selected pixel, all material coefficients, original coordinates, fit errors, status, and actual sparsity used. Partial runs retain unprocessed pixels as blank coefficients.
+- `spectra.csv`: every selected pixel and every native band, with original row/column, band index, wavelength in nm, raw measurement, scaled measurement, and source validity. No spectral interpolation is performed. Scaled values divide raw measurements by the header scale factor (or 1 when absent). Header bad-band values are retained and flagged invalid; nonfinite measurements and scaled no-data values are blank. Analysis wavelength exclusions are recorded separately in metadata.
+- `analysis.json`: dataset name/version, bounds, native wavelengths, source validity information, scale, library material snapshots, solver settings, retry settings, and visualization settings.
+
+The server streams ZIP members into a temporary file. Each export allows up to 5 million spectral samples; selected abundance results must also fit the 20 MB request limit. Select smaller rectangles if a limit is reached. Browser downloads and the scene results still require local memory. Opening another dataset invalidates previous selections.
+
+The Library heatmap uses the HELMET logo palette (dark violet → violet → teal), with the existing fixed 0–0.6 reflectance scale and excluded-band markers.
+
+Run Python checks with `venv/bin/python -m unittest discover -s tests`. Optional pure-JavaScript geometry checks use `node tests/test_unmix_geometry.cjs`.

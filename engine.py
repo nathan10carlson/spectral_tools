@@ -217,8 +217,8 @@ def alignment_preview(target,candidates,settings):
     signal=bool(valid.any() and np.linalg.norm(y[valid])>0 and np.all(np.linalg.norm(A[valid],axis=0)>0))
     return dict(target_bands=len(target['wavelengths']),analysis_bands=len(w),target_valid_bands=count,used_bands=int(valid.sum()),wavelengths=w.tolist(),status=reasons,candidates=rows,can_fit=enough and signal,message='' if enough and signal else 'Too few shared valid bands or zero signal. Review candidates and exclusions.')
 
-def fit(target,candidates,settings):
-    w,y,A,valid=matrix(target,candidates,settings);X=A[valid];t=y[valid]
+def fit(target,candidates,settings,*,aligned=None,diagnostics=True):
+    w,y,A,valid=matrix(target,candidates,settings) if aligned is None else aligned;X=A[valid];t=y[valid]
     mode=settings.get('mode','sparse');warnings=[]
     if mode=='sparse':
         a,alpha,ok,iterations=sparse_fit(X,t,float(settings.get('strength',.001)))
@@ -240,8 +240,8 @@ def fit(target,candidates,settings):
             warnings.append('Maximum-material selection uses a prune-and-refit heuristic, not an exhaustive subset search.')
     else:raise ValueError('Unknown fitting mode.')
     Xn=X/np.linalg.norm(X,axis=0)
-    if len(a)>1 and np.max(Xn.T@Xn-np.eye(len(a)))>.995:warnings.append('Very similar candidates: individual abundances may be ambiguous.')
-    if np.linalg.matrix_rank(X)<len(a):warnings.append('Linearly dependent candidates; coefficients may not be unique.')
+    if diagnostics and len(a)>1 and np.max(Xn.T@Xn-np.eye(len(a)))>.995:warnings.append('Very similar candidates: individual abundances may be ambiguous.')
+    if diagnostics and np.linalg.matrix_rank(X)<len(a):warnings.append('Linearly dependent candidates; coefficients may not be unique.')
     pred=X@a;res=t-pred;full=np.full(len(w),np.nan);full[valid]=pred
     if not np.any(a>1e-8):warnings.append('No active coefficients. Lower sparsity or choose other candidates.')
     return dict(wavelengths=w.tolist(),values=clean(full),name='Reconstruction',coefficients=[dict(id=e['spectrum_id'],name=e['name'],color=e.get('color'),value=float(v)) for e,v in zip(candidates,a)],coefficient_sum=float(a.sum()),rmse=float(np.sqrt(np.mean(res**2))),relative_error=float(np.linalg.norm(res)/np.linalg.norm(t)),used_bands=int(valid.sum()),excluded_bands=int((~valid).sum()),warnings=warnings,mode=mode,alpha=alpha)

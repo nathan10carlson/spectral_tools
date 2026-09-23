@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict');
+const g=require('../static/unmix_geometry.js');
+const m={rows:10,cols:20};
+assert.deepEqual(g.rectangle({x:2,y:3},{x:6,y:8},m),{row_start:3,column_start:2,row_end:7,column_end:5});
+assert.deepEqual(g.rectangle({x:6,y:8},{x:2,y:3},m),g.rectangle({x:2,y:3},{x:6,y:8},m));
+assert.deepEqual(g.rectangle({x:-2,y:-3},{x:25,y:15},m),{row_start:0,column_start:0,row_end:9,column_end:19});
+assert.deepEqual(g.rectangle({x:4.3,y:6.2},{x:4.3,y:6.2},m),{row_start:6,column_start:4,row_end:6,column_end:4});
+assert.equal(g.rectangle({x:-3,y:3},{x:0,y:5},m),null);
+assert.equal(g.rectangle({x:20,y:0},{x:25,y:4},m),null);
+assert.deepEqual(g.rectangle({x:0,y:0},{x:0,y:0},m),{row_start:0,column_start:0,row_end:0,column_end:0});
+const view={centerX:150,centerY:80,zoom:2},left={left:20,top:50,width:400,height:300},right={...left,left:432};
+assert.deepEqual(g.point(view,left,100,120),g.point(view,right,512,120));
+const before=g.point(view,left,100,120),zoomed=g.zoom(view,1.25,left,100,120),after=g.point(zoomed,left,100,120);
+assert.ok(Math.abs(before.x-after.x)<1e-10&&Math.abs(before.y-after.y)<1e-10);
+const restored=g.zoom(zoomed,.8,left,100,120);
+assert.deepEqual(restored,view);
+assert.equal(g.zoom(view,1000).zoom,128);
+console.log('Linked geometry: rectangle bounds, clipping, shared coordinates, zoom anchoring passed.');

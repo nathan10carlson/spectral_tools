@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """HELMET unified local workbench. Run: python3 app.py"""
-import argparse, io, json, threading
+import argparse, io, json, threading, shutil
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,6 +8,8 @@ import numpy as np
 from PIL import Image
 from cube_reader import Cube, parse_envi_header, nearest_bands
 from region import region_average
+from scene_unmix import unmix_batch
+from unmix_export import export_rectangle
 from engine import alignment_preview
 from material_analysis import Preferences, settings_for, average, rank, duplicates
 from resampling import configuration
@@ -15,11 +17,12 @@ from engine import prepare, Store, clean, vector, align, apply_mask, fit, compar
 
 ROOT=Path(__file__).resolve().parent
 class Workspace:
-    def __init__(self,library,path):
+    def __init__(self,library,path=None):
         self.lock=threading.RLock();self.version=0
-        self.store=Store(library,json.loads((ROOT/'data/samples.json').read_text()))
+        self.store=Store(library,[])
         self.preferences=Preferences(library)
-        self.open(path)
+        self.cube=None;self.cache={}
+        if path:self.open(path)
     def open(self,path):
         p=Path(path).expanduser().resolve()
         if not p.is_file():raise ValueError('Image file was not found. Enter its full local path.')
@@ -34,9 +37,11 @@ class Workspace:
         cube=Cube(str(p),h['bands'],h['lines'],h['samples'],h['dtype'],h['interleave'],h.get('scale') or 1,wl[0],wl[-1],wavelengths=wl,bbl=h.get('bbl'),nodata=h.get('nodata'),offset=h.get('offset',0))
         self.cube=cube;self.version+=1;self.cache={};self.scale_inferred=h.get('scale') is None
     def meta(self):
+        if self.cube is None:return None
         c=self.cube
-        return dict(name=Path(c.path).name,rows=c.nr,cols=c.nc,bands=c.nb,masked=int(c.masked.sum()),wl_min=float(c.wl[0]),wl_max=float(c.wl[-1]),version=self.version,synthetic=Path(c.path)==ROOT/'data/demo.img',scale=c.scale,scale_inferred=self.scale_inferred)
+        return dict(name=Path(c.path).name,rows=c.nr,cols=c.nc,bands=c.nb,masked=int(c.masked.sum()),wl_min=float(c.wl[0]),wl_max=float(c.wl[-1]),version=self.version,scale=c.scale,scale_inferred=self.scale_inferred)
     def pixel(self,r,c):
+        if self.cube is None:raise ValueError('Open a dataset first.')
         cube=self.cube
         if type(r)is not int or type(c)is not int or not(0<=r<cube.nr and 0<=c<cube.nc):raise ValueError('Pixel coordinates are outside this cube.')
         v=cube.pixel_spectrum(r,c);v[cube.masked]=np.nan
@@ -56,6 +61,7 @@ class Workspace:
         if any(i not in library for i in ids):raise ValueError('A candidate is no longer available.')
         return [library[i] for i in ids]
     def rgb(self,palette):
+        if self.cube is None:raise ValueError('Open a dataset first.')
         if palette in self.cache:return self.cache[palette]
         c=self.cube;targets=[660,550,480] if palette=='true' else [850,660,550]
         arrays=[]
@@ -100,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
                 if p.path=='/api/pixel':return self.send(w.pixel(int(q.get('row',['0'])[0]),int(q.get('column',['0'])[0])))
                 if p.path=='/api/rgb':return self.send(w.rgb(q.get('palette',['false'])[0]),'image/png')
                 if p.path=='/api/library.csv':return self.send(w.store.to_csv(w.store.read()).encode(),'text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="HELMET-library.csv"'})
-            files={'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/region.js':('region.js','text/javascript'),'/workflow.js':('workflow.js','text/javascript'),'/materials.js':('materials.js','text/javascript'),'/style.css':('style.css','text/css')}
+            files={'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/region.js':('region.js','text/javascript'),'/workflow.js':('workflow.js','text/javascript'),'/unmix.js':('unmix.js','text/javascript'),'/unmix_geometry.js':('unmix_geometry.js','text/javascript'),'/unmix_viewer.js':('unmix_viewer.js','text/javascript'),'/materials.js':('materials.js','text/javascript'),'/style.css':('style.css','text/css')}
             if p.path in files:
                 name,kind=files[p.path];return self.send((ROOT/'static'/name).read_bytes(),kind+'; charset=utf-8')
             self.send({'error':'Not found'},status=404)
@@ -114,6 +120,14 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<length<=20_000_000:raise ValueError('Request must be smaller than 20 MB.')
             d=json.loads(self.rfile.read(length));w=self.workspace
             with w.lock:
+                if self.path in ('/api/fit/scene','/api/region/export','/api/region/average','/api/scores') and w.cube is None:raise ValueError('Open a dataset first.')
+                if self.path=='/api/region/export':
+                    if d.get('version')!=w.version:raise ValueError('Dataset changed. Select the region again.')
+                    with export_rectangle(w.cube,w.rgb(d.get('palette','false')),d) as archive:
+                        archive.seek(0,2);size=archive.tell();archive.seek(0)
+                        self.send_response(200);self.send_header('Content-Type','application/zip');self.send_header('Content-Length',str(size));self.send_header('Content-Disposition','attachment; filename=HELMET-region.zip');self.send_header('Cache-Control','no-store');self.end_headers()
+                        shutil.copyfileobj(archive,self.wfile)
+                    return
                 if self.path=='/api/categories':result=w.preferences.category(d['name'])
                 elif self.path=='/api/presets':result=w.preferences.preset(d['name'],d['settings'])
                 elif self.path=='/api/library/category':
@@ -147,6 +161,9 @@ class Handler(BaseHTTPRequestHandler):
                     if d.get('version')!=w.version:raise ValueError('Dataset changed. Select the region again.')
                     result=region_average(w.cube,d['bounds'])
                 elif self.path=='/api/fit/preview':result=alignment_preview(w.target(d),w.candidates(d['ids']),d.get('settings',{}))
+                elif self.path=='/api/fit/scene':
+                    if d.get('version')!=w.version:raise ValueError('Dataset changed. Run scene unmixing again.')
+                    result=unmix_batch(w.cube,w.candidates(d['ids']),d.get('settings',{}),d.get('start'),d.get('count',64),d.get('retry',True),float(d.get('ceiling',.1)))
                 elif self.path=='/api/fit':result=fit(w.target(d),w.candidates(d['ids']),d.get('settings',{}))
                 elif self.path=='/api/compare':result=compare(w.target(d),w.candidates(d['ids']),d.get('settings',{}))
                 elif self.path=='/api/mix':result=mixture(w.candidates(d['ids']),d['weights'],d.get('settings',{}))
@@ -157,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:self.send({'error':str(e)},status=500)
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--path',default=str(ROOT/'data/demo.img'));p.add_argument('--library',default=str(ROOT/'data/spectral_library.csv'));p.add_argument('--port',type=int,default=8766);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--path',default=None);p.add_argument('--library',default=str(ROOT/'data/spectral_library.csv'));p.add_argument('--port',type=int,default=8766);a=p.parse_args()
     Handler.workspace=Workspace(a.library,a.path)
     server=ThreadingHTTPServer(('127.0.0.1',a.port),Handler)
     print(f'HELMET ready: http://127.0.0.1:{a.port}',flush=True)
