@@ -108,7 +108,7 @@ The supplied earlier folders remain unchanged; this is a separate, consolidated 
 
 ### Full-scene abundance maps
 
-In the dedicated **Unmix** workspace, choose library candidates and solver settings, then select **Unmix entire scene**. Every pixel is attempted in batches of 64, using the same wavelength alignment, validity masks, scaling, and solver as individual-pixel fitting. Progress reports invalid and failed pixels. **Stop after current batch** retains partial results. Large scenes and highly correlated candidate libraries can take time; results are held in browser memory until settings change or the page reloads.
+In the dedicated **Unmix** workspace, choose library candidates and solver settings, then select **Unmix entire scene**. Every pixel is attempted in checkpointed tiles of up to 2,048 pixels, using the same wavelength alignment, validity masks, scaling, and sparse objective as individual-pixel fitting. The HELMET grid and Balanced accuracy are the defaults; native bands and Precise accuracy remain available. Progress reports invalid and failed pixels. **Pause and keep checkpoint** retains finished tiles. The unfinished tile is recomputed on resume. Large scenes and highly correlated candidate libraries can take time; results are saved on disk and can be reopened from **Saved analyses** after a reload or restart. The browser also keeps the currently displayed results in memory.
 
 Select a **Material channel** beneath the spectral chart to view its abundances. Hover/click a pixel or enter its zero-based row and column for the exact coefficient, RMSE, status, and sparsity used. The default display scale is 0–1; change **Display maximum** or select **Fit channel range** for other ranges. Gray means unavailable, not zero. Sparse coefficients are raw nonnegative regression weights and may exceed 1 or sum to a value other than 1; fraction mode retains its sum-to-one constraint.
 
@@ -137,3 +137,37 @@ The server streams ZIP members into a temporary file. Each export allows up to 5
 The Library heatmap uses the HELMET logo palette (dark violet → violet → teal), with the existing fixed 0–0.6 reflectance scale and excluded-band markers.
 
 Run Python checks with `venv/bin/python -m unittest discover -s tests`. Optional pure-JavaScript geometry checks use `node tests/test_unmix_geometry.cjs`.
+
+### Faster processing and saved analyses
+
+**Unmix** defaults to the configured HELMET grid (80 centers, with excluded or unsupported bands omitted from fitting). This is spectral resampling; spatial resolution is unchanged. Native measurements remain intact for inspection and region exports.
+
+Sparse regression now solves groups of pixels sharing the same valid bands together, reusing their Gram matrices. Cached spectral tiles are independent of the candidate list, sparsity, and accuracy, so those changes can reuse the preparation work. Interpolation is vectorized over pixels with identical source masks, with the same gap and no-extrapolation rules as individual fits. Prepared tiles use a 128 MiB memory LRU and a 2 GiB disk cache. Old cache tiles may be evicted; saved analysis results are retained.
+
+Accuracy profiles control the relative KKT convergence tolerance and maximum sparse iterations:
+
+| Profile | Tolerance | Iteration limit | Intended use |
+| --- | --- | --- | --- |
+| Fast | 1e-5 | 2,000 | Exploratory previews |
+| Balanced | 1e-7 | 6,000 | Default scene processing |
+| Precise | 1e-9 | 20,000 | Original solver tolerance |
+
+These tolerances describe optimization convergence, not confidence in material identification. Similar or dependent library spectra can produce nonunique coefficients. Higher sparsity retries still apply only to nonconverged pixels and record the strength actually used. Fraction mode retains the original CPU SLSQP and prune/refit behavior; its spectral preparation and checkpoint workflow benefit from the new infrastructure, but sparse accuracy profiles and GPU solving do not apply to fractions.
+
+**Processing device → Auto** benchmarks the batched CPU against an available Apple MPS or NVIDIA CUDA GPU on up to 512 trial pixels. Transfer and CPU certification costs are included. Auto uses the GPU only if it is at least 15% faster on that trial; otherwise it uses CPU. Small material libraries often favor the CPU. You can select a device explicitly. GPU sparse fits use projected-gradient acceleration and are checked/refined against the float64 CPU KKT criteria. Device errors fall back to CPU with a visible explanation. Performance and coefficient differences can vary for highly correlated candidates.
+
+PyTorch is optional. To enable GPU detection in another environment:
+
+```sh
+venv/bin/python -m pip install -r requirements-gpu.txt
+```
+
+Apple acceleration requires a PyTorch/macOS combination that reports MPS available. NVIDIA setups require a CUDA-enabled PyTorch installation appropriate to their drivers. Without GPU support the batched CPU path remains fully functional. No data is sent to an external service.
+
+Before a full run, expand **Preview a region before the full scene**. Enter inclusive source row/column bounds, or choose **Draw preview rectangle**, drag on the linked image, and choose **Use rectangle for region preview**. Then run the preview. The progress readout shows pixels/second, approximate remaining time, retry/failure/invalid counts, selected backend, and cache reuse. A preview also estimates full-scene runtime. It is approximate because spectral complexity and missing data can vary across the scene.
+
+Every run automatically saves immutable settings and material spectra, plus atomic result checkpoints. **Saved analyses → Open saved run** reloads its results and original dataset; **Resume saved run** continues incomplete processing. Closing the browser does not stop the server's worker. Restarting the server marks interrupted runs paused, preserving committed tiles. Source path, size, modification time, and header hash must match before resuming; changed source files require a new analysis. Only one worker runs per library at a time, including across server processes. Changes to active fitting inputs pause the displayed run and leave its checkpoint available.
+
+Saved runs and cache tiles are stored beside the library in `.helmet/<library-stem>/`. These files are excluded from Git. A source dataset must remain available to reopen its linked views or export its original spectra. Region ZIP metadata includes the accuracy profile and actual device.
+
+A reproducible synthetic benchmark is available with `venv/bin/python tests/benchmark_unmix.py`. It compares the original and batched sparse paths on 400-band data and reports elapsed time plus maximum coefficient/RMSE differences. It is not a speed guarantee for a particular scene.

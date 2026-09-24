@@ -9,6 +9,8 @@ from PIL import Image
 from cube_reader import Cube, parse_envi_header, nearest_bands
 from region import region_average
 from scene_unmix import unmix_batch
+from fast_unmix import backend_info, source_fingerprint
+from unmix_jobs import RunManager
 from unmix_export import export_rectangle
 from engine import alignment_preview
 from material_analysis import Preferences, settings_for, average, rank, duplicates
@@ -21,6 +23,7 @@ class Workspace:
         self.lock=threading.RLock();self.version=0
         self.store=Store(library,[])
         self.preferences=Preferences(library)
+        self.runs=RunManager(Path(library).resolve().parent/'.helmet'/Path(library).stem)
         self.cube=None;self.cache={}
         if path:self.open(path)
     def open(self,path):
@@ -35,7 +38,7 @@ class Workspace:
         wl=np.array(h['wavelength'],float)
         if not np.isfinite(wl).all() or np.any(np.diff(wl)<=0):raise ValueError('Wavelengths must be finite, unique, and increasing.')
         cube=Cube(str(p),h['bands'],h['lines'],h['samples'],h['dtype'],h['interleave'],h.get('scale') or 1,wl[0],wl[-1],wavelengths=wl,bbl=h.get('bbl'),nodata=h.get('nodata'),offset=h.get('offset',0))
-        self.cube=cube;self.version+=1;self.cache={};self.scale_inferred=h.get('scale') is None
+        self.cube=cube;self.cube_fingerprint=source_fingerprint(cube);self.version+=1;self.cache={};self.scale_inferred=h.get('scale') is None
     def meta(self):
         if self.cube is None:return None
         c=self.cube
@@ -99,6 +102,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         p=urlparse(self.path);q=parse_qs(p.query);w=self.workspace
         try:
+            if p.path=='/api/unmix/backends':return self.send(backend_info())
+            if p.path=='/api/unmix/runs':return self.send(w.runs.list())
+            if p.path=='/api/unmix/status':return self.send(w.runs.status(q.get('id',[''])[0],int(q.get('after',['0'])[0]),int(q.get('limit',['2048'])[0])))
             with w.lock:
                 if p.path=='/api/analysis/config':return self.send({'defaults':configuration(),**w.preferences.read()})
                 if p.path=='/api/meta':return self.send(w.meta())
@@ -120,6 +126,20 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<length<=20_000_000:raise ValueError('Request must be smaller than 20 MB.')
             d=json.loads(self.rfile.read(length));w=self.workspace
             with w.lock:
+                if self.path=='/api/unmix/start':
+                    if w.cube is None:raise ValueError('Open a dataset first.')
+                    if d.get('version')!=w.version:raise ValueError('Dataset changed. Start again.')
+                    if source_fingerprint(w.cube)!=w.cube_fingerprint:raise ValueError('The source files changed. Reopen the dataset before running.')
+                    return self.send(w.runs.start(w.cube,w.meta(),w.candidates(d['ids']),d['settings'],d.get('accuracy','balanced'),d.get('device','auto'),d.get('retry',True),float(d.get('ceiling',.1)),d.get('bounds'),d.get('preview',False)))
+                if self.path=='/api/unmix/pause':return self.send(w.runs.pause(d['id']))
+                if self.path in ('/api/unmix/load','/api/unmix/resume'):
+                    record=w.runs.info(d['id']);source=record['source']
+                    if not Path(source['path']).is_file() or source_fingerprint(source['path'])!=source:raise ValueError('The saved source image or header is missing or changed. Start a new analysis.')
+                    if w.cube is None or w.cube_fingerprint!=source:
+                        w.open(source['path'])
+                    if source_fingerprint(w.cube)!=source:raise ValueError('The source image or header changed. Start a new analysis.')
+                    if self.path=='/api/unmix/resume':record=w.runs.resume(w.cube,d['id'])
+                    return self.send({**record,'meta':w.meta()})
                 if self.path in ('/api/fit/scene','/api/region/export','/api/region/average','/api/scores') and w.cube is None:raise ValueError('Open a dataset first.')
                 if self.path=='/api/region/export':
                     if d.get('version')!=w.version:raise ValueError('Dataset changed. Select the region again.')
@@ -180,4 +200,5 @@ def main():
     print(f'HELMET ready: http://127.0.0.1:{a.port}',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:server.server_close()
+    finally:Handler.workspace.runs.close()
 if __name__=='__main__':main()

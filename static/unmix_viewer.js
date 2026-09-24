@@ -91,7 +91,7 @@ $('exportCrop').onclick=async()=>{
  if(!abundanceRun||!V.selection||V.exporting||V.boundsDirty)return;
  const run=abundanceRun,b={...V.selection},pixels=[];
  for(let r=b.row_start;r<=b.row_end;r++)for(let c=b.column_start;c<=b.column_end;c++)pixels.push(run.pixels[r*run.meta.cols+c]||{row:r,column:c,status:'unprocessed',coefficients:null});
- const payload={run_started_utc:run.startedAt,version:run.meta.version,bounds:b,pixels,materials:run.materials,settings:run.settings,retry:run.retry,channel:Number($('abundanceChannel').value),maximum:Number($('abundanceMaximum').value),palette:V.palette};
+ const payload={run_started_utc:run.startedAt,version:run.meta.version,bounds:b,pixels,materials:run.materials,settings:run.settings,processing:{accuracy:run.accuracy,device:run.actual_device},retry:run.retry,channel:Number($('abundanceChannel').value),maximum:Number($('abundanceMaximum').value),palette:V.palette};
  const body=JSON.stringify(payload);if(new Blob([body]).size>20000000){$('cropExportStatus').textContent='The abundance data exceeds the 20 MB request limit. Select a smaller rectangle.';return}
  V.exporting=true;renderCropSelection();$('cropExportStatus').textContent='Preparing images, measured spectra, and abundance results…';
  try{
@@ -103,3 +103,13 @@ $('exportCrop').onclick=async()=>{
  finally{V.exporting=false;renderCropSelection()}
 };
 new ResizeObserver(()=>{if(viewer.open)drawLinkedViews()}).observe($('linkedOriginal'));
+
+// Reuse the linked source-coordinate rectangle tool for a preflight ROI.
+const usePreview=Object.assign(document.createElement('button'),{id:'usePreviewBounds',className:'button',textContent:'Use rectangle for region preview'});
+$('clearCrop').before(usePreview);
+usePreview.onclick=()=>{if(!V.selection||V.boundsDirty){$('cropExportStatus').textContent='Select a valid rectangle first.';return}for(const [id,k] of [['previewRow0','row_start'],['previewRow1','row_end'],['previewCol0','column_start'],['previewCol1','column_end']])$(id).value=V.selection[k];closeUnmixViewer();document.querySelector('.preview-controls').open=true;$('runUnmixPreview').scrollIntoView({block:'center',behavior:'smooth'})};
+$('pickPreviewRegion').onclick=()=>{
+ if(!S.meta)return toast('Open a dataset first.',true);
+ if(!abundanceRun){const materials=[...S.selected].map(entry).filter(Boolean);if(!materials.length)return toast('Select candidates first.',true);renderRun({meta:{...S.meta},materials,settings:fitSettings(),accuracy:$('unmixAccuracy').value,key:unmixKey(),pixels:new Array(S.meta.rows*S.meta.cols),preview:true,selectionOnly:true,cancelled:false})}
+ openUnmixViewer();$('viewerRectangle').click();
+};

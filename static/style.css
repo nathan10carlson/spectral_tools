@@ -45,3 +45,6 @@
 .linked-panes canvas{border:0;outline:1px solid #344053;outline-offset:-1px}
 
 .linked-panes h3{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.preview-controls{margin:14px 0;padding:12px;border:1px solid var(--border);border-radius:8px}.preview-controls summary{cursor:pointer;color:var(--teal)}.preview-controls p{margin:12px 0;line-height:1.7}
+.saved-runs{margin-top:20px}.saved-runs>p,#savedUnmixRuns{padding:0 20px 16px}.saved-run{display:flex;justify-content:space-between;align-items:center;gap:16px;border-top:1px solid var(--border);padding:14px 0}.saved-run small{margin-top:6px;color:var(--muted)}#backendInfo{margin:8px 0 14px;line-height:1.6}

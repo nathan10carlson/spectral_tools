@@ -115,7 +115,7 @@ def export_rectangle(cube, rgb, payload):
                 native_wavelengths_nm=cube.wl.tolist(), reflectance_scale=cube.scale,
                 source_bad_band_indices=np.flatnonzero(cube.masked).tolist(),
                 source_nodata=float(cube.nodata) if cube.nodata is not None and np.isfinite(cube.nodata) else None,
-                settings=payload['settings'], retry=payload.get('retry',{}), materials=materials,
+                settings=payload['settings'], processing=payload.get('processing',{}), retry=payload.get('retry',{}), materials=materials,
                 display=dict(channel_id=materials[channel]['spectrum_id'], maximum=maximum, palette=payload.get('palette','false'),
                     png_raster_bounds=dict(x=0,y=56,width=width,height=height)),
                 spectra_note='Native measurements, no interpolation. scaled_value = raw_value / reflectance_scale. Source bad-band values are retained with source_valid=0; no-data scaled values are blank. Analysis exclusions are recorded in settings and are not applied to this source export.',

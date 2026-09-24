@@ -1,0 +1,2 @@
+# Optional acceleration; the application runs without this package.
+torch>=2.2

@@ -35,3 +35,5 @@ env/
 build/
 dist/
 *.egg-info/
+# Cached spectra and saved analysis checkpoints
+.helmet/
