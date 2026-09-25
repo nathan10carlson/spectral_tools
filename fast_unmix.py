@@ -231,6 +231,16 @@ class BatchedUnmixer:
         self.w,_,self.A,shared=aligned_inputs(template,candidates,settings)
         if shared.sum()<max(3,len(candidates)):raise ValueError('Too few shared usable bands for these candidates. Reduce candidates or choose the native target grid.')
 
+    def batch_size(self):
+        """Bound working arrays to an estimated 256 MiB per sparse batch.
+
+        Cache chunks remain independent of solver batches. Fractions still uses
+        a per-pixel optimizer, so retain shorter checkpoint intervals there.
+        """
+        if self.settings.get('mode','sparse')=='fractions':return 2048
+        bytes_per_pixel=8*(6*len(self.w)+16*len(self.candidates))+1024
+        return max(1,min(16384,(256*1024*1024)//bytes_per_pixel))
+
     def solve(self,G,B,strength):
         if not self.calibrated:
             self.calibrated=True;info=backend_info();available=[v for v in info['devices'] if v!='cpu']

@@ -45,14 +45,14 @@ function updateRunProgress(run,record){
  const rate=record.seconds>0?record.done/record.seconds:0;
  const eta=rate?durationText((record.total-record.done)/rate):'estimating';
  $('unmixProgress').max=record.total;$('unmixProgress').value=record.done;
- $('unmixStatus').textContent=`${record.state.toUpperCase()} · ${record.done.toLocaleString()} / ${record.total.toLocaleString()} pixels · ${rate?rate.toFixed(0)+' pixels/s':'preparing first tile'} · remaining ${record.state==='complete'?'0s':eta} · ${record.counts.retried} retried · ${record.counts.failed} failed · ${record.counts.invalid} invalid. ${record.analysis_bands} analysis bands. ${record.device_message}. Cache: ${record.cache_hits} reused, ${record.cache_misses} prepared. ${record.message}`+(record.preview&&rate?` Estimated full scene: ${durationText(run.meta.rows*run.meta.cols/rate)} (approximate).`:'');
+ $('unmixStatus').textContent=`${record.state.toUpperCase()} · ${record.done.toLocaleString()} / ${record.total.toLocaleString()} pixels · ${rate?rate.toFixed(0)+' pixels/s':'preparing first tile'} · remaining ${record.state==='complete'?'0s':eta} · ${record.counts.retried} retried · ${record.counts.failed} failed · ${record.counts.invalid} invalid. ${record.analysis_bands} analysis bands. Batch: ${(record.batch_size||2048).toLocaleString()} pixels. ${record.device_message}. Cache: ${record.cache_hits} reused, ${record.cache_misses} prepared. ${record.message}`+(record.preview&&rate?` Estimated full scene: ${durationText(run.meta.rows*run.meta.cols/rate)} (approximate).`:'');
  $('cancelUnmix').hidden=record.state!=='running';$('resumeUnmix').hidden=!['paused','error'].includes(record.state)||record.done>=record.total;
  $('unmixScene').disabled=$('runUnmixPreview').disabled=record.state==='running';
 }
 async function followUnmix(run){
  try{
   while(abundanceRun===run&&!run.cancelled){
-   const data=await api(`unmix/status?id=${run.id}&after=${run.cursor}&limit=2048`);
+   const data=await api(`unmix/status?id=${run.id}&after=${run.cursor}&limit=4096`);
    if(abundanceRun!==run||run.cancelled)return;
    let first=Infinity,last=0;
    for(const p of data.pixels){const index=p.row*run.meta.cols+p.column;run.pixels[index]=p;first=Math.min(first,index);last=Math.max(last,index+1)}

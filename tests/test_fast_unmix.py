@@ -116,6 +116,18 @@ class FastTests(unittest.TestCase):
         self.assertEqual([p['attempts'] for p in rows],[2,1,1]);self.assertEqual(rows[0]['strength'],.01)
         self.assertEqual(rows[0]['status'],'retried')
 
+    def test_memory_bounded_batch_size_and_partition_parity(self):
+        cube,materials=self.fixture(pixels=48)
+        solver=BatchedUnmixer(cube,materials,{},device='cpu')
+        self.assertEqual(solver.batch_size(),16384)
+        whole=solver.batch(np.arange(48))
+        split=solver.batch(np.arange(17))+solver.batch(np.arange(17,48))
+        np.testing.assert_allclose([p['coefficients'] for p in whole],[p['coefficients'] for p in split],atol=1e-12)
+        solver.w=np.arange(10000)
+        self.assertLess(solver.batch_size(),2048)
+        solver.settings={'mode':'fractions'}
+        self.assertEqual(solver.batch_size(),2048)
+
     def test_checkpoint_pause_restart_resume_and_source_change(self):
         cube,materials=self.fixture(pixels=4100)
         with tempfile.TemporaryDirectory() as folder:
@@ -124,7 +136,7 @@ class FastTests(unittest.TestCase):
             original=BatchedUnmixer.batch
             def stop_after_first(solver,indices):
                 result=original(solver,indices);manager.cancel.set();return result
-            with patch.object(BatchedUnmixer,'batch',stop_after_first):
+            with patch.object(BatchedUnmixer,'batch',stop_after_first), patch.object(BatchedUnmixer,'batch_size',return_value=2048):
                 record=manager.start(cube,dict(name='scene.img',rows=1,cols=4100,bands=80,version=1),materials,{},device='cpu')
                 manager.thread.join(10)
             status=manager.info(record['id']);self.assertEqual(status['done'],2048);self.assertEqual(status['state'],'paused')

@@ -116,7 +116,7 @@ class RunManager:
         self.cancel.clear();self.active_id=record['id']
         if solver is None:
             solver=BatchedUnmixer(cube,record['materials'],record['settings'],self.cache,record['source'],record['accuracy'],record['device'],record['retry']['enabled'],record['retry']['ceiling'],self.cancel)
-        record.update(state='running',message='Processing; each finished tile is saved automatically.')
+        record.update(batch_size=solver.batch_size(),state='running',message='Processing; each finished tile is saved automatically.')
         with self.connect(record['id']) as db:self.write_info(db,record)
         self.thread=threading.Thread(target=self.work,args=(cube,record,solver),daemon=True,name='helmet-unmix')
         self.thread.start()
@@ -141,7 +141,7 @@ class RunManager:
         try:
             b=record['bounds'];width=b['column_end']-b['column_start']+1
             while record['done']<record['total'] and not self.cancel.is_set():
-                begin=time.perf_counter();start=record['done'];stop=min(record['total'],start+2048)
+                begin=time.perf_counter();start=record['done'];stop=min(record['total'],start+record['batch_size'])
                 seq=np.arange(start,stop);indices=(b['row_start']+seq//width)*cube.nc+b['column_start']+seq%width
                 rows=solver.batch(indices)
                 updated=json.loads(json.dumps(record))
