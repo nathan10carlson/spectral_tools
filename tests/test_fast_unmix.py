@@ -12,6 +12,19 @@ from unmix_jobs import RunManager
 
 
 class FastTests(unittest.TestCase):
+    def test_sparse_compaction_preserves_warm_start_and_pixel_order(self):
+        rng=np.random.default_rng(81)
+        X=rng.random((59,12));weights=rng.random((12,40))
+        weights[:,::5]=0
+        Y=X@weights;G=X.T@X/59;B=X.T@Y/59
+        initial=rng.random((12,40))*.01;initial[:,::5]=0
+        answer,ok,iterations,kkt=sparse_cpu(G,B,.001,'precise',initial=initial)
+        expected=np.column_stack([sparse_fit(X,Y[:,i],.001)[0] for i in range(40)])
+        np.testing.assert_allclose(answer,expected,atol=1e-7)
+        self.assertTrue(ok.all())
+        self.assertTrue(np.all(iterations>0))
+        self.assertTrue(np.all(answer[:,::5]==0))
+
     def fixture(self,pixels=24,bands=80):
         rng=np.random.default_rng(4)
         w=np.linspace(420,2400,bands);X=.04+rng.random((bands,4))*.7

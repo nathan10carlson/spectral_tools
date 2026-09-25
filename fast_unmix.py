@@ -156,19 +156,28 @@ def sparse_cpu(G, B, strength, accuracy='balanced', initial=None, cancel=None):
     converged=np.zeros(p,dtype=bool);iterations=np.zeros(p,dtype=int)
     active=np.arange(p)
     # Broadcast coordinate updates over the active pixels, never over bands.
-    residual=B-alpha-G@a
+    # Keep only unfinished pixels in contiguous working arrays. Fancy-indexing
+    # residual[:, active] inside every coordinate update copies and scatters the
+    # entire matrix thousands of times for correlated material spectra.
+    work=a.copy();rhs=np.ascontiguousarray(B-alpha)
+    residual=rhs-G@work
     for iteration in range(budget):
         if cancel is not None and iteration%32==0 and cancel.is_set():raise InterruptedError('Paused')
         for j in range(n):
-            delta=np.maximum(0,a[j,active]+residual[j,active]/G[j,j])-a[j,active]
-            a[j,active]+=delta
-            residual[:,active]-=G[:,j,None]*delta[None,:]
-        if iteration%32==31:residual[:,active]=B[:,active]-alpha[active]-G@a[:,active]
-        kkt=np.max(np.where(a[:,active]>0,np.abs(residual[:,active]),np.maximum(residual[:,active],0)),axis=0)
+            delta=np.maximum(0,work[j]+residual[j]/G[j,j])-work[j]
+            work[j]+=delta
+            residual-=G[:,j,None]*delta[None,:]
+        if iteration%32==31:residual=rhs-G@work
+        kkt=np.max(np.where(work>0,np.abs(residual),np.maximum(residual,0)),axis=0)
         done=kkt<=limit[active]
-        converged[active[done]]=True;iterations[active]=iteration+1
-        active=active[~done]
+        if np.any(done):
+            a[:,active[done]]=work[:,done];iterations[active[done]]=iteration+1
+            active=active[~done]
+            work=np.ascontiguousarray(work[:,~done])
+            rhs=np.ascontiguousarray(rhs[:,~done])
+            residual=np.ascontiguousarray(residual[:,~done])
         if not len(active):break
+    if len(active):a[:,active]=work;iterations[active]=iteration+1
     # Always certify the returned answer using the original double-precision system.
     gradient=G@a-B+alpha
     kkt=np.max(np.where(a>0,np.abs(gradient),np.maximum(-gradient,0)),axis=0)
