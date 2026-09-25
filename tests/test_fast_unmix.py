@@ -162,6 +162,24 @@ class FastTests(unittest.TestCase):
             source.write_bytes(b'changed')
             with self.assertRaises(ValueError):restarted.resume(cube,record['id'])
 
+    def test_saved_single_pixel_coordinates_and_result_survive_restart(self):
+        cube,materials=self.fixture(pixels=30)
+        cube.nr=5;cube.nc=6;cube.data=cube.data.reshape(cube.nb,5,6)
+        target=dict(row=2,column=3,wavelengths=cube.wl.tolist(),values=cube.data[:,2,3].tolist())
+        result=fit(target,materials,{})
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'scene.img';cube.data.tofile(source);cube.path=str(source)
+            manager=RunManager(Path(folder)/'runs')
+            run_id=manager.save_pixel(cube,dict(name='scene.img'),target,materials,{},result)
+            manager.close()
+            reopened=RunManager(Path(folder)/'runs');self.addCleanup(reopened.close)
+            record=reopened.info(run_id);page=reopened.status(run_id)
+            self.assertEqual(record['target'],target)
+            self.assertEqual(record['fit_result'],result)
+            self.assertEqual(record['bounds'],dict(row_start=2,row_end=2,column_start=3,column_end=3))
+            self.assertEqual(page['pixels'][0]['pixel_index'],15)
+            self.assertEqual(page['pixels'][0]['coefficients'],[c['value'] for c in result['coefficients']])
+
     def test_preview_coordinates_and_saved_snapshot(self):
         cube,materials=self.fixture(pixels=30);cube.nr=5;cube.nc=6;cube.data=cube.data.reshape(cube.nb,5,6)
         with tempfile.TemporaryDirectory() as folder:
@@ -173,6 +191,14 @@ class FastTests(unittest.TestCase):
             self.assertEqual([(p['row'],p['column']) for p in page['pixels']],[(2,1),(2,2),(2,3),(3,1),(3,2),(3,3)])
             materials[0]['name']='Edited later'
             self.assertNotEqual(manager.info(record['id'])['materials'][0]['name'],'Edited later')
+            manager.remove(record['id'])
+            self.assertTrue(manager.list()[0]['removed'])
+            with self.assertRaises(ValueError):manager.resume(cube,record['id'])
+            manager.remove(record['id'],False)
+            self.assertFalse(manager.info(record['id'])['removed'])
+            self.assertEqual(manager.status(record['id'])['pixels'],page['pixels'])
+            with self.assertRaises(ValueError):manager.remove('../outside')
+
 
 
 if __name__=='__main__':unittest.main()

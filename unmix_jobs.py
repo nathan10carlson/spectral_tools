@@ -89,9 +89,22 @@ class RunManager:
         for path in self.root.glob('*/run.sqlite'):
             try:
                 r=self.info(path.parent.name)
-                records.append({k:r[k] for k in ('id','label','created','state','done','total','meta','bounds','message')})
+                records.append({**{k:r[k] for k in ('id','label','created','state','done','total','meta','bounds','message')},'removed':r.get('removed',False)})
             except (ValueError,sqlite3.Error,TypeError):continue
         return sorted(records,key=lambda r:r['created'],reverse=True)
+
+    def remove(self,run_id,removed=True):
+        if type(removed) is not bool:raise ValueError('Invalid removal setting.')
+        with self.lock:
+            if self.thread and self.thread.is_alive():raise ValueError('Pause the current analysis before removing or restoring saved runs.')
+            try:lock_worker(self.worker_lock,True)
+            except BlockingIOError:raise ValueError('Pause the active analysis before changing saved runs.')
+            try:
+                record=self.info(run_id)
+                record['removed']=removed
+                with self.connect(run_id) as db:self.write_info(db,record)
+                return record
+            finally:lock_worker(self.worker_lock,False)
 
     def start(self,cube,meta,candidates,settings,accuracy='balanced',device='auto',retry=True,ceiling=.1,bounds=None,preview=False):
         with self.lock:
@@ -110,6 +123,31 @@ class RunManager:
             self.launch(cube,record,solver)
             return self.info(run_id)
 
+    def save_pixel(self,cube,meta,target,candidates,settings,result):
+        """Persist the exact Explore fit, without recomputing it in a batch."""
+        row,column=target['row'],target['column']
+        bounds=region_bounds(cube,dict(row_start=row,row_end=row,column_start=column,column_end=column))
+        run_id=uuid.uuid4().hex;folder=self.root/run_id;folder.mkdir()
+        record=dict(format_version=RUN_FORMAT,id=run_id,label=f"Pixel ({row}, {column}) · {meta['name']}",
+            kind='pixel',created=now(),state='complete',message='Pixel fit saved.',done=1,total=1,seconds=0.,
+            counts=dict(ok=1,retried=0,invalid=0,failed=0),meta=meta,source=source_fingerprint(cube),
+            materials=candidates,settings=settings,accuracy='precise',device='cpu',actual_device='cpu',
+            device_message='Single-pixel CPU',backend_timings={},retry=dict(enabled=False,ceiling=max(.1,float(settings.get('strength',.001)))),
+            bounds=bounds,preview=False,analysis_bands=len(result['wavelengths']),iterations=0,
+            cache_hits=0,cache_misses=0,batch_size=1,target=target,fit_result=result)
+        pixel=dict(row=row,column=column,pixel_index=row*cube.nc+column,status='ok',
+            coefficients=[c['value'] for c in result['coefficients']],rmse=result['rmse'],
+            relative_error=result['relative_error'],used_bands=result['used_bands'],
+            strength=float(settings.get('strength',.001)),attempts=1,iterations=0,kkt=None,
+            message='; '.join(result['warnings']))
+        with sqlite3.connect(folder/'run.sqlite') as db:
+            db.execute('PRAGMA journal_mode=WAL');db.execute('PRAGMA synchronous=FULL')
+            db.execute('CREATE TABLE info (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            db.execute('CREATE TABLE pixels (seq INTEGER PRIMARY KEY, payload TEXT NOT NULL)')
+            self.write_info(db,record)
+            db.execute('INSERT INTO pixels VALUES (?,?)',(0,json.dumps(pixel,allow_nan=False)))
+        return run_id
+
     def launch(self,cube,record,solver=None):
         try:lock_worker(self.worker_lock,True)
         except BlockingIOError:raise ValueError('Another HELMET process is running an analysis for this library.')
@@ -125,6 +163,7 @@ class RunManager:
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('A run is already processing. Wait for it to pause.')
             record=self.info(run_id)
+            if record.get('removed'):raise ValueError('Restore this analysis before resuming it.')
             if source_fingerprint(cube)!=record['source']:raise ValueError('The source image or header changed. Start a new analysis.')
             if record['format_version']!=RUN_FORMAT:raise ValueError('This checkpoint uses a different solver version. Start a new analysis.')
             if record['done']>=record['total']:return record

@@ -10,21 +10,28 @@ $('goIndex').classList.add('target-action');
 
 const unmixPage=document.createElement('section');unmixPage.id='unmix';unmixPage.className='page';
 unmixPage.innerHTML='<div class="unmix-grid"><aside class="panel"><div class="panel-head"><h2>Unmixing settings</h2></div><div id="unmixSettings"></div></aside><div id="unmixMaps"><article id="unmixEmpty" class="panel empty-state"><h2>Map the materials in your scene</h2><p>Select candidates, then run Unmix entire scene. Open the comparison viewer to inspect both images and save a rectangle.</p></article></div></div>';
-$('explore').after(unmixPage);$('unmixSettings').append($('fitPanel'));$('fitPanel').hidden=false;
-for(const b of document.querySelectorAll('[data-inspector]'))b.onclick=()=>{if(b.dataset.inspector==='fit')setPage('unmix');else $('matchPanel').hidden=false};
+$('explore').after(unmixPage);
+const pixelFitHome=document.createElement('div');$('fitPanel').before(pixelFitHome);
+const unmixSetPage=setPage;setPage=function(page){
+ const inExplore=page!=='unmix';
+ (inExplore?pixelFitHome:$('unmixSettings')).prepend($('fitPanel'));
+ $('fitPanel').hidden=inExplore&&!document.querySelector('[data-inspector="fit"]').classList.contains('active');
+ pixelFitDetails.hidden=!inExplore;
+ unmixSetPage(page);
+};
 for(const id of ['explore','unmix']){const empty=document.createElement('article');empty.className='panel dataset-empty';empty.innerHTML='<div class="empty-state"><h2>Open your hyperspectral dataset</h2><p>Load an ENVI image and its matching header to explore spectra and map material abundances.</p><button class="button violet">Open dataset</button></div>';empty.querySelector('button').onclick=()=>$('openDataset').click();$(id).prepend(empty)}
 const sceneRun=document.createElement('div');sceneRun.className='scene-unmix-controls';
 sceneRun.innerHTML=`<h3>Unmix every pixel</h3><label>Accuracy<select id="unmixAccuracy"><option value="fast">Fast · exploratory</option><option value="balanced" selected>Balanced</option><option value="precise">Precise · reference tolerance</option></select></label><label>Processing device<select id="unmixDevice"><option value="auto">Auto · benchmark available devices</option><option value="cpu">Batched CPU</option><option value="mps">Apple GPU (MPS)</option><option value="cuda">NVIDIA GPU (CUDA)</option></select></label><p id="backendInfo" class="micro">Checking available devices…</p><p class="micro">Accuracy profiles and GPU acceleration apply to sparse regression. Fractions retain the existing constrained CPU solver.</p><p class="micro">Uses the selected candidates and fitting settings above. Sparse coefficients retain their scale and may exceed 1.</p><label class="checkbox-inline"><input id="retrySparse" type="checkbox" checked>Retry nonconverged sparse fits</label><label>Maximum retry sparsity<input id="retryCeiling" type="number" min="0" max="1" step=".001" value=".1"></label><p class="micro">Retries increase sparsity ×10 up to this limit. Higher sparsity does not guarantee a better reconstruction.</p><button id="unmixScene" class="button violet full">Unmix entire scene</button><button id="cancelUnmix" class="button full" hidden>Pause and keep checkpoint</button><button id="resumeUnmix" class="button full" hidden>Resume saved run</button><progress id="unmixProgress" value="0" max="1" aria-label="Scene unmixing progress"></progress><p id="unmixStatus" role="status" class="micro">Ready to process all pixels.</p>`;
-$('candidateList').after(sceneRun);
+$('unmixSettings').append(sceneRun);sceneRun.classList.add('inspector-inner');
 const previewControls=document.createElement('details');previewControls.className='preview-controls';previewControls.innerHTML='<summary>Preview a region before the full scene</summary><p class="micro">Enter zero-based, inclusive bounds or draw on the original image. The preview estimates full-scene runtime; other regions may converge differently.</p><div class="pair"><label>First row<input id="previewRow0" type="number" min="0" value="0"></label><label>Last row<input id="previewRow1" type="number" min="0" value="63"></label><label>First column<input id="previewCol0" type="number" min="0" value="0"></label><label>Last column<input id="previewCol1" type="number" min="0" value="63"></label></div><button id="pickPreviewRegion" class="button full">Draw preview rectangle</button><button id="runUnmixPreview" class="button full">Run region preview</button>';
 $('unmixScene').before(previewControls);
-const savedRuns=document.createElement('article');savedRuns.className='panel saved-runs';savedRuns.innerHTML='<div class="panel-head"><h2>Saved analyses</h2><button id="refreshUnmixRuns" class="button subtle">Refresh</button></div><p class="micro">Finished tiles are saved automatically. Runs continue if you close the browser. Resume interrupted runs after restarting HELMET.</p><div id="savedUnmixRuns"></div>';$('unmix').append(savedRuns);
+const savedRuns=document.createElement('article');savedRuns.className='panel saved-runs';savedRuns.innerHTML='<div class="panel-head"><h2>Saved analyses</h2><button id="refreshUnmixRuns" class="button subtle">Refresh</button></div><p class="micro">Finished tiles are saved automatically. Runs continue if you close the browser. Resume interrupted runs after restarting HELMET.</p><label class="checkbox-inline"><input type="checkbox" id="showRemovedRuns">Show removed analyses</label><div id="savedUnmixRuns"></div>';$('unmix').append(savedRuns);
 $('fitGrid').value='configured';
 
-const pixelFitDetails=document.createElement('details');pixelFitDetails.className='pixel-fit-details';pixelFitDetails.innerHTML='<summary>Fit a single pixel from Explore</summary>';
+const pixelFitDetails=document.createElement('div');pixelFitDetails.className='pixel-fit-details';
 pixelFitDetails.append($('fitCoverage'),$('fitPixel'),$('fitResults'));$('fitPanel').append(pixelFitDetails);
 const abundancePanel=document.createElement('article');abundancePanel.className='panel abundance-panel';abundancePanel.hidden=true;
-abundancePanel.innerHTML=`<div class="panel-head"><h2>Material abundance map</h2><button id="openUnmixViewer" class="button violet">Open comparison viewer</button><button id="exportAbundances" class="button subtle">Download pixel CSV</button></div><div class="abundance-controls"><label>Material channel<select aria-label="Material channel" id="abundanceChannel"></select></label><label>Display maximum<input aria-label="Display maximum" id="abundanceMaximum" type="number" min=".000001" step=".1" value="1"></label><button id="abundanceAuto" class="button">Fit channel range</button></div><p id="abundanceContext" class="micro"></p><div class="abundance-viewport"><canvas id="abundanceCanvas" aria-label="Per-pixel material abundance map"></canvas></div><div class="abundance-legend"><span>0</span><i></i><span id="abundanceMaxLabel">1</span><span>Gray = invalid, failed, or unprocessed</span></div><p id="abundanceReadout" class="reference-info">Hover or click the map to inspect a pixel.</p><div class="abundance-controls"><label>Row<input id="abundanceRow" type="number" min="0" value="0"></label><label>Column<input id="abundanceColumn" type="number" min="0" value="0"></label><button id="inspectAbundance" class="button">Inspect abundance</button></div>`;
+abundancePanel.innerHTML=`<div class="panel-head"><h2>Material abundance map</h2><button id="openUnmixViewer" class="button violet">Open comparison viewer</button><button id="exportAbundances" class="button subtle">Download pixel CSV</button></div><div class="abundance-controls"><label>Material channel<select aria-label="Material channel" id="abundanceChannel"></select></label><label>Display maximum<input aria-label="Display maximum" id="abundanceMaximum" type="number" min=".000001" step=".1" value="1"></label><button id="abundanceAuto" class="button">Fit channel range</button></div><p id="abundanceContext" class="micro"></p><div class="abundance-viewport"><canvas id="abundanceCanvas" aria-label="Per-pixel material abundance map"></canvas></div><div class="abundance-legend"><span>0</span><i></i><span id="abundanceMaxLabel">1</span><span>Unavailable pixels are omitted</span></div><p id="abundanceReadout" class="reference-info">Hover or click the map to inspect a pixel.</p><div class="abundance-controls"><label>Row<input id="abundanceRow" type="number" min="0" value="0"></label><label>Column<input id="abundanceColumn" type="number" min="0" value="0"></label><button id="inspectAbundance" class="button">Inspect abundance</button></div>`;
 $('unmixMaps').append(abundancePanel);
 let abundanceRun=null;
 function unmixKey(){return JSON.stringify({version:S.meta?.version,ids:[...S.selected],settings:fitSettings(),accuracy:$('unmixAccuracy').value,device:$('unmixDevice').value,retry:$('retrySparse').checked,ceiling:$('retryCeiling').value})}
@@ -36,7 +43,7 @@ function renderRun(run){
  if(typeof closeUnmixViewer==='function')closeUnmixViewer();abundanceRun=run;abundancePanel.hidden=false;$('unmixEmpty').hidden=true;
  $('abundanceChannel').innerHTML=run.materials.map((e,i)=>`<option value="${i}">${esc(e.name)}</option>`).join('');
  $('abundanceRow').max=run.meta.rows-1;$('abundanceColumn').max=run.meta.cols-1;
- $('abundanceContext').textContent=`${run.meta.name} · ${run.preview?'Region preview · ':''}${run.settings.mode==='sparse'?'Raw sparse coefficients':'Sum-to-one fractions'} · ${run.accuracy||'balanced'} · source coordinates preserved. Original spectra remain available for export.`;
+ $('abundanceContext').textContent=`${run.meta.name} · ${run.preview?'Region preview · ':''}${run.settings.mode==='sparse'?'Raw sparse coefficients':'Sum-to-one fractions'} · ${run.accuracy||'balanced'} · source coordinates preserved. Original spectra remain available for export. ${runPixelCoordinates(run)}.`;
  $('abundanceReadout').textContent='Hover or click the map to inspect a pixel.';drawAbundances();
 }
 function durationText(seconds){return seconds<60?Math.ceil(seconds)+'s':seconds<3600?Math.ceil(seconds/60)+' min':(seconds/3600).toFixed(1)+' hr'}
@@ -70,6 +77,15 @@ function showSavedRecord(record){
  $('unmixAccuracy').value=record.accuracy;$('unmixDevice').value=record.device;$('retrySparse').checked=record.retry.enabled;$('retryCeiling').value=record.retry.ceiling;
  $('strengthLabel').hidden=$('fitMode').value==='fractions';$('limitLabel').hidden=$('fitMode').value!=='fractions';
  S.pixelRequest++;S.pixel=null;S.reference=null;S.comparison=null;S.selectionPurpose='reference';S.scores=null;invalidateFit();renderSceneSelection();renderMeta();renderCandidates();reloadImage(true);setPage('unmix');
+ if(record.kind==='pixel'&&record.target&&record.fit_result){
+  clearAbundances();S.pixel=record.target;S.fit=record.fit_result;
+  const r=S.pixel.row,c=S.pixel.column;pixelEntryMode='coordinates';
+  $('pixelRow').value=r;$('pixelCol').value=c;$('pixelIndex').value=r*S.meta.cols+c;
+  $('pixelReadout').textContent=`ROW ${r} / COL ${c} / PIXEL ${r*S.meta.cols+c}`;
+  $('spectrumLabel').textContent=`Saved fit · Pixel ${r}, ${c}`;
+  $('fitResults').innerHTML=resultsHTML(S.fit)+`<p class="micro">Saved row ${record.target.row}, column ${record.target.column}.</p>`;
+  setPage('explore');document.querySelector('[data-inspector="fit"]').click();renderSceneSelection();renderExploreChart();return;
+ }
  const run={...record,startedAt:record.created,key:unmixKey(),pixels:new Array(record.meta.rows*record.meta.cols),cursor:0,cancelled:false,palette:S.palette};
  renderRun(run);updateRunProgress(run,record);followUnmix(run);
 }
@@ -85,10 +101,22 @@ $('unmixScene').onclick=()=>busy($('unmixScene'),()=>startUnmix(false)).then(()=
 $('runUnmixPreview').onclick=()=>busy($('runUnmixPreview'),()=>startUnmix(true)).then(()=>{if(abundanceRun?.state==='running')$('runUnmixPreview').disabled=true});
 $('cancelUnmix').onclick=()=>busy($('cancelUnmix'),async()=>{if(abundanceRun?.id){await api('unmix/pause',{id:abundanceRun.id});$('unmixStatus').textContent='Pausing; completed tiles are already saved…'}});
 $('resumeUnmix').onclick=()=>busy($('resumeUnmix'),async()=>{if(!abundanceRun?.id)return;showSavedRecord(await api('unmix/resume',{id:abundanceRun.id}));await refreshUnmixRuns()});
-async function refreshUnmixRuns(){
- const records=await api('unmix/runs');$('savedUnmixRuns').innerHTML=records.map(r=>`<div class="saved-run"><div><strong>${esc(r.label)}</strong><small>${esc(new Date(r.created).toLocaleString())} · ${esc(r.state)} · ${r.done.toLocaleString()} / ${r.total.toLocaleString()} pixels</small></div><button class="button" data-run-id="${r.id}">Open saved run</button></div>`).join('')||'<p class="micro">No saved analyses yet.</p>';
- for(const button of $('savedUnmixRuns').querySelectorAll('button'))button.onclick=()=>busy(button,async()=>showSavedRecord(await api('unmix/load',{id:button.dataset.runId})));
+function runPixelCoordinates(run){
+ const b=run.bounds;if(!b)return 'Pixel coordinates unavailable';
+ return `Rows ${b.row_start}–${b.row_end} · columns ${b.column_start}–${b.column_end} (zero-based, inclusive)`;
 }
+async function refreshUnmixRuns(){
+ const records=await api('unmix/runs');const removed=$('showRemovedRuns').checked;
+ $('savedUnmixRuns').innerHTML=records.filter(r=>!!r.removed===removed).map(r=>`<div class="saved-run"><div><strong>${esc(r.label)}</strong><small>${esc(new Date(r.created).toLocaleString())} · ${esc(r.state)} · ${r.done.toLocaleString()} / ${r.total.toLocaleString()} pixels</small><small>${esc(runPixelCoordinates(r))}</small></div>${r.removed?'':`<button class="button" data-run-id="${r.id}">Open saved run</button>`}<button class="button subtle" data-remove-id="${r.id}" data-removed="${!r.removed}">${r.removed?'Restore':'Remove'}</button></div>`).join('')||'<p class="micro">No saved analyses in this view.</p>';
+ for(const button of $('savedUnmixRuns').querySelectorAll('[data-run-id]'))button.onclick=()=>busy(button,async()=>showSavedRecord(await api('unmix/load',{id:button.dataset.runId})));
+ for(const button of $('savedUnmixRuns').querySelectorAll('[data-remove-id]'))button.onclick=()=>busy(button,async()=>{
+  const removed=button.dataset.removed==='true';
+  await api('unmix/remove',{id:button.dataset.removeId,removed});
+  if(removed&&abundanceRun?.id===button.dataset.removeId)clearAbundances();
+  await refreshUnmixRuns();toast(removed?'Analysis removed. Restore it from Show removed analyses.':'Analysis restored.');
+ });
+}
+$('showRemovedRuns').onchange=()=>refreshUnmixRuns().catch(e=>toast(e.message,true));
 $('refreshUnmixRuns').onclick=()=>busy($('refreshUnmixRuns'),refreshUnmixRuns);
 (async()=>{try{const data=await api('unmix/backends');$('backendInfo').textContent=data.devices.map(v=>v.toUpperCase()).join(' + ')+'. '+data.message;for(const option of $('unmixDevice').options)if(!['auto','cpu'].includes(option.value)&&!data.devices.includes(option.value))option.disabled=true;await refreshUnmixRuns()}catch(e){$('backendInfo').textContent=e.message}})();
 function drawAbundances(start=0,end=abundanceRun?.pixels.length){
@@ -100,7 +128,7 @@ function drawAbundances(start=0,end=abundanceRun?.pixels.length){
  const context=canvas.getContext('2d'),pixels=context.createImageData(canvas.width,lastRow-firstRow);
  for(let i=offset;i<lastRow*run.meta.cols;i++){
   const v=run.pixels[i]?.coefficients?.[channel];
-  if(v===undefined||v===null){pixels.data.set([81,87,99,255],(i-offset)*4);continue}
+  if(v===undefined||v===null||!Number.isFinite(v))continue;
   const t=Math.max(0,Math.min(1,v/max));pixels.data.set([Math.round(12+52*t),Math.round(20+183*t),Math.round(40+123*t),255],(i-offset)*4);
  }
  context.putImageData(pixels,0,firstRow);$('abundanceMaxLabel').textContent=max.toPrecision(4);if(typeof drawLinkedViews==='function')drawLinkedViews();

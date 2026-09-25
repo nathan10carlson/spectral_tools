@@ -45,9 +45,10 @@ class ExportTests(unittest.TestCase):
             original=np.asarray(Image.open(io.BytesIO(z.read('original.png'))))
             np.testing.assert_array_equal(original[56:58,:2],self.rgb[1:3,1:3])
             image=np.asarray(Image.open(io.BytesIO(z.read('abundance.png'))))
-            np.testing.assert_array_equal(image[56,0],[17,38,52])
+            np.testing.assert_array_equal(image[56,0],[17,38,52,255])
 
     def test_partial_and_invalid_pixels_are_not_zeros(self):
+        self.payload['pixels'][0]['coefficients']=[0.,0.]
         self.payload['pixels'][1].update(status='failed',coefficients=None)
         self.payload['pixels'][3]=dict(row=2,column=2,status='unprocessed',coefficients=None)
         with export_rectangle(self.cube,self.png,self.payload) as f,zipfile.ZipFile(f) as z:
@@ -55,7 +56,9 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(rows[1]['Grass [grass]'],'')
             self.assertEqual(rows[3]['status'],'unprocessed')
             image=np.asarray(Image.open(io.BytesIO(z.read('abundance.png'))))
-            np.testing.assert_array_equal(image[56,1],[81,87,99])
+            np.testing.assert_array_equal(image[56,1],[0,0,0,0])
+            self.assertEqual(image[57,1,3],0)
+            np.testing.assert_array_equal(image[56,0],[12,20,40,255])
 
     def test_invalid_bounds_pixel_order_and_size(self):
         self.payload['bounds']['row_end']=3

@@ -127,7 +127,7 @@ Choose **Select rectangle** and drag in either image; reversed drags are support
 **Save images + abundances + spectra** downloads one ZIP containing:
 
 - `original.png`: native-resolution RGB crop with palette and coordinate captions.
-- `abundance.png`: native-resolution crop of the displayed material, with its name and a 0-to-display-maximum legend. Unavailable coefficients are gray. Captions add padding; the original raster begins at (0, 56), and its dimensions are recorded in metadata.
+- `abundance.png`: native-resolution crop of the displayed material, with its name and a 0-to-display-maximum legend. Unavailable coefficients are omitted (transparent); valid zero coefficients retain their abundance color. Captions add padding; the original raster begins at (0, 56), and its dimensions are recorded in metadata.
 - `abundances.csv`: every selected pixel, all material coefficients, original coordinates, fit errors, status, and actual sparsity used. Partial runs retain unprocessed pixels as blank coefficients.
 - `spectra.csv`: every selected pixel and every native band, with original row/column, band index, wavelength in nm, raw measurement, scaled measurement, and source validity. No spectral interpolation is performed. Scaled values divide raw measurements by the header scale factor (or 1 when absent). Header bad-band values are retained and flagged invalid; nonfinite measurements and scaled no-data values are blank. Analysis wavelength exclusions are recorded separately in metadata.
 - `analysis.json`: dataset name/version, bounds, native wavelengths, source validity information, scale, library material snapshots, solver settings, retry settings, and visualization settings.
@@ -171,3 +171,7 @@ Every run automatically saves immutable settings and material spectra, plus atom
 Saved runs and cache tiles are stored beside the library in `.helmet/<library-stem>/`. These files are excluded from Git. A source dataset must remain available to reopen its linked views or export its original spectra. Region ZIP metadata includes the accuracy profile and actual device.
 
 A reproducible synthetic benchmark is available with `venv/bin/python tests/benchmark_unmix.py`. It compares the original and batched sparse paths on 400-band data and reports elapsed time plus maximum coefficient/RMSE differences. It is not a speed guarantee for a particular scene.
+
+Single-pixel unmixing is available in **Explore → Unmix**, beside the scene and reconstructed spectrum. Full-image runs remain in **Unmix**. In **Saved analyses**, use **Remove** to hide an analysis; enable **Show removed analyses** to restore it. Removal retains its files and does not reclaim disk space. Pause any active analysis before removing or restoring saved runs.
+
+Saved analysis entries display zero-based, inclusive row and column bounds. Every successful Explore pixel fit is automatically saved with its exact source pixel, native spectrum, material snapshots, settings, and result; reopening it restores the fit in Explore. Scene and preview checkpoints retain individual pixel coordinates and statuses as batches complete.

@@ -38,7 +38,7 @@ def labeled_png(image, title, subtitle, maximum=None):
     # Keep the cropped raster at native resolution; captions occupy separate rows.
     measure = ImageDraw.Draw(Image.new('RGB', (1, 1)))
     width = max(540, image.width, int(measure.textlength(title))+24, int(measure.textlength(subtitle))+24)
-    result = Image.new('RGB', (width, image.height + 104), '#111923')
+    result = Image.new('RGBA' if image.mode == 'RGBA' else 'RGB', (width, image.height + 104), '#111923')
     result.paste(image, (0, 56))
     draw = ImageDraw.Draw(result)
     draw.text((12, 10), title, fill='#e4e9f3')
@@ -49,7 +49,7 @@ def labeled_png(image, title, subtitle, maximum=None):
             t = x / 159
             draw.line((34+x, y, 34+x, y+10), fill=tuple(round(a+b*t) for a,b in ((12,52),(20,183),(40,123))))
         draw.text((12, y), '0', fill='white')
-        draw.text((202, y), f'{maximum:g}  |  gray = unavailable', fill='white')
+        draw.text((202, y), f'{maximum:g}  |  unavailable pixels omitted', fill='white')
     else:
         draw.text((12, image.height + 72), 'Native pixel crop; display RGB stretch, not measured spectra.', fill='#a5b1c2')
     output = io.BytesIO()
@@ -73,7 +73,7 @@ def export_rectangle(cube, rgb, payload):
     if len(pixels) != count:
         raise ValueError('Export requires one result record for every selected pixel.')
     width, height = c1-c0+1, r1-r0+1
-    colors = np.full((height, width, 3), [81,87,99], dtype=np.uint8)
+    colors = np.zeros((height, width, 4), dtype=np.uint8)
     for i, p in enumerate(pixels):
         r, c = r0 + i//width, c0 + i%width
         if (p.get('row'), p.get('column')) != (r, c):
@@ -84,7 +84,7 @@ def export_rectangle(cube, rgb, payload):
             if a.shape != (len(materials),) or not np.isfinite(a).all() or (a < 0).any():
                 raise ValueError('Invalid abundance coefficients.')
             t = min(1., max(0., a[channel]/maximum))
-            colors[i//width, i%width] = [round(12+52*t), round(20+183*t), round(40+123*t)]
+            colors[i//width, i%width] = [round(12+52*t), round(20+183*t), round(40+123*t), 255]
     output = tempfile.TemporaryFile()
     try:
         with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:

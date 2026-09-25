@@ -126,14 +126,24 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<length<=20_000_000:raise ValueError('Request must be smaller than 20 MB.')
             d=json.loads(self.rfile.read(length));w=self.workspace
             with w.lock:
+                if self.path=='/api/fit/pixel':
+                    if w.cube is None:raise ValueError('Open a dataset first.')
+                    if d.get('version')!=w.version:raise ValueError('Dataset changed. Select the pixel again.')
+                    if source_fingerprint(w.cube)!=w.cube_fingerprint:raise ValueError('Source files changed. Reopen the dataset.')
+                    target=w.pixel(d.get('row'),d.get('column'));candidates=w.candidates(d['ids']);settings=d.get('settings',{})
+                    result=fit(target,candidates,settings)
+                    run_id=w.runs.save_pixel(w.cube,w.meta(),target,candidates,settings,result)
+                    return self.send({**result,'run_id':run_id,'row':target['row'],'column':target['column']})
                 if self.path=='/api/unmix/start':
                     if w.cube is None:raise ValueError('Open a dataset first.')
                     if d.get('version')!=w.version:raise ValueError('Dataset changed. Start again.')
                     if source_fingerprint(w.cube)!=w.cube_fingerprint:raise ValueError('The source files changed. Reopen the dataset before running.')
                     return self.send(w.runs.start(w.cube,w.meta(),w.candidates(d['ids']),d['settings'],d.get('accuracy','balanced'),d.get('device','auto'),d.get('retry',True),float(d.get('ceiling',.1)),d.get('bounds'),d.get('preview',False)))
+                if self.path=='/api/unmix/remove':return self.send(w.runs.remove(d['id'],d.get('removed',True)))
                 if self.path=='/api/unmix/pause':return self.send(w.runs.pause(d['id']))
                 if self.path in ('/api/unmix/load','/api/unmix/resume'):
                     record=w.runs.info(d['id']);source=record['source']
+                    if record.get('removed'):raise ValueError('Restore this analysis before opening it.')
                     if not Path(source['path']).is_file() or source_fingerprint(source['path'])!=source:raise ValueError('The saved source image or header is missing or changed. Start a new analysis.')
                     if w.cube is None or w.cube_fingerprint!=source:
                         w.open(source['path'])
